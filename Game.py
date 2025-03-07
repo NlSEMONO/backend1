@@ -2,6 +2,8 @@ import random
 
 type grid = list[list[bool]]
 type turn = tuple[int, int, int]
+type move = tuple[int, int, int]
+type sequence = tuple[move, move, move]
 
 class Game:
     R_BOUND = 8
@@ -92,6 +94,9 @@ class Game:
             buf = size
             print_str += " " * (buf // 2) + f"{i + 1}" + " " * ((buf // 2) + (buf % 2))
         print(print_str)
+        
+    def _copy_matrix(self):
+        return [[self.matrix[i][j] for j in range(self.R_BOUND)] for i in range(self.R_BOUND)]
     
     def is_done(self):
         return self._is_done
@@ -119,6 +124,7 @@ class Game:
                 return False
         n = len(self.blocks[b])
         m = len(self.blocks[b][0])
+
         for i in range(n):
             for j in range(m):
                 if not self.blocks[b][i][j]:
@@ -164,19 +170,21 @@ class Game:
             for i in range(self.R_BOUND):
                 m[i][col] = True
     
-    def _gen_perms(self, nums: list[int], perm_so_far: list[int], used: set[int], res: set[turn]):
-        # valid permutation
+    def _gen_perms(self, nums: list[int], perm_so_far: list[int], used: set[int]):
+        res = set()
+        # valid permutation, add result
         if len(nums) == len(perm_so_far):
             res.add(tuple(perm_so_far))
-            return
+            return res
         # recurse
-        for i in range(len(nums)):
-            if i not in used:
-                perm_so_far.append(i)
-                used.add(i)
-                self._gen_perms(nums, perm_so_far, used, res)
-                used.remove(i)
+        for num in nums:
+            if num not in used:
+                perm_so_far.append(num)
+                used.add(num)
+                res = res.union(self._gen_perms(nums, perm_so_far, used))
+                used.remove(num)
                 perm_so_far.pop()
+        return res
     
     def _validate_choice_wkr(self, blks: list[int], m: grid, idx: int):
         if idx == 3:
@@ -192,10 +200,9 @@ class Game:
                     return True
         return False
     
-    def _validate_choice(self, blks: list[int], m: grid, dp):
-        perms = set()
+    def _validate_choice(self, blks: list[int], m: grid):
         used = set()
-        self._gen_perms(blks, [], used, perms)
+        perms = self._gen_perms(blks, [], used)
         for perm in perms:
             if self._validate_choice_wkr(list(perm), m, 0):
                 return True
@@ -203,18 +210,42 @@ class Game:
         
     def _get_next_3(self):
         res = set()
-        dp = [[[False for _ in range(self.all_blocks)] for _ in range(self.all_blocks)] for _ in range(self.all_blocks)]
-        recur_matrix = [[self.matrix[i][j] for j in range(self.R_BOUND)] for i in range(self.R_BOUND)]
+        recur_matrix = self._copy_matrix()
         
         # see if there is a placement of the permutation that does not result in death
         for i in range(1, self.all_blocks):
             for j in range(i, self.all_blocks):
                 for k in range(j, self.all_blocks):
-                    if self._validate_choice([i, j, k], recur_matrix, dp):
+                    if self._validate_choice([i, j, k], recur_matrix):
                         res.add(tuple([i, j, k]))
         res = list(res)
         choice = random.choice(res)
         self.choices = list(choice)
+    
+    def _get_sequences(self, perm: turn, idx: int, m: grid, seq_so_far: list[move]) -> list[sequence]:
+        if idx == len(perm):
+            return [tuple(seq_so_far)]
+        options = []
+        for i in range(self.R_BOUND):
+            for j in range(self.R_BOUND):
+                if self._validate_action(perm[idx], i, j, m, False):
+                    self._place_block(perm[idx], i, j, m)
+                    r, c = self._remove_rows_and_cols(m)
+                    seq_so_far.append((idx, i, j))
+                    options.extend(self._get_sequences(perm, idx + 1, m, seq_so_far))
+                    seq_so_far.pop()
+                    self._add_rows_and_cols(r, c, m)
+                    self._remove_block(perm[idx], i, j, m)
+        return options
+    
+    def _get_best_turn(self):
+        used = set()
+        perms = self._gen_perms(self.choices, [], used)
+        options = []
+        m = self._copy_matrix()
+        for perm in perms:
+            options.extend(self._get_sequences(perm, 0, m, []))
+        print(options)
         
     def perform_action(self, b: int, x: int, y: int):
         b -= 1
