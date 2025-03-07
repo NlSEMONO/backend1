@@ -1,6 +1,7 @@
 import random
 
 type grid = list[list[bool]]
+type turn = tuple[int, int, int]
 
 class Game:
     R_BOUND = 8
@@ -14,6 +15,8 @@ class Game:
         [[True for _ in range(5)]], # 1x5
         [[True for _ in range(4)]], # 1x4
         [[True for _ in range(3)]], # 1x3
+        [[True for _ in range(2)]], # 1x2
+        [[j == i for j in range(3)] for i in range(3)], # staircase
         [[True, False], [True, True], [False, True]], # Z-shape 0
         [[False, True], [True, True], [True, False]], # Z-shape reflect 0
         [[True for _ in range(3)] for _ in range(2)], # 2x3
@@ -24,7 +27,6 @@ class Game:
         [[True, False], [True, False], [True, True]], # L-shape 0
         [[False,True], [False,True], [True, True]], # L-shape reflect 0
         [[True, False, False], [True, False, False], [True, True, True]], # L-shape big 0
-        [[False, False,True], [False, False,True], [True, True, True]], # L-shape big reflect 0
         
     ]
     blocks = [
@@ -162,61 +164,59 @@ class Game:
             for i in range(self.R_BOUND):
                 m[i][col] = True
     
-    def _next_3_wkr_gen(self, res, arr, m, idx, dp):
-        # see if there is success case
-        if len(arr) == 3:
-            res.add(tuple(arr))
-            dp[arr[0]][arr[1]][arr[2]] = True
-        else:
-            for k in range(idx, self.all_blocks):
-                # don't compute if success for 3 chosen blocks alr exists
-                if len(arr) == 2 and dp[arr[0]][arr[1]][k]:
-                    continue
-                elif len(arr) == 1 and dp[arr[0]][k][0]:
-                    continue
-                
-                # compute all possible locations of next block
-                for i in range(self.R_BOUND):
-                    for j in range(self.R_BOUND):
-                        # if placing block on valid index, see if it is possible to form a valid group of 3 w/o death
-                        if self._validate_action(k, i, j, m, False):
-                            self._place_block(k, i, j, m)
-                            r, c = self._remove_rows_and_cols(m)
-                            arr.append(k)
-                            rr = self._next_3_wkr_gen(res, arr, m, k, dp)
-                            arr.pop()
-                            self._add_rows_and_cols(r, c, m)
-                            self._remove_block(k, i, j, m)
-                            
-                            # jump to next block if current block has valid group of 3
-                            if rr:
-                                i = self.R_BOUND
-                                j = self.R_BOUND
-
-            # update dp
-            if len(arr) > 0:
-                first_zero = len(arr)
-                if first_zero == 1:
-                    dp[arr[0]][0][0] = all([dp[arr[0]][k][0] for k in range(idx, self.all_blocks)])
-                elif first_zero == 2:
-                    dp[arr[0]][arr[1]][0] =  all([dp[arr[0]][arr[1]][k] for k in range(idx, self.all_blocks)])
-                    
+    def _gen_perms(self, nums: list[int], perm_so_far: list[int], used: set[int], res: set[turn]):
+        # valid permutation
+        if len(nums) == len(perm_so_far):
+            res.add(tuple(perm_so_far))
+            return
+        # recurse
+        for i in range(len(nums)):
+            if i not in used:
+                perm_so_far.append(i)
+                used.add(i)
+                self._gen_perms(nums, perm_so_far, used, res)
+                used.remove(i)
+                perm_so_far.pop()
+    
+    def _validate_choice_wkr(self, blks: list[int], m: grid, idx: int):
+        if idx == 3:
+            return True
+        for i in range(self.R_BOUND):
+            for j in range(self.R_BOUND):
+                if self._validate_action(blks[idx], i, j, m, False):
+                    self._place_block(blks[idx], i, j, m)
+                    r, c = self._remove_rows_and_cols(m)
+                    self._validate_choice_wkr(blks, m, idx + 1)
+                    self._add_rows_and_cols(r, c, m)
+                    self._remove_block(blks[idx], i, j, m)
+                    return True
+        return False
+    
+    def _validate_choice(self, blks: list[int], m: grid, dp):
+        perms = set()
+        used = set()
+        self._gen_perms(blks, [], used, perms)
+        for perm in perms:
+            if self._validate_choice_wkr(list(perm), m, 0):
+                return True
+        return False
         
     def _get_next_3(self):
         res = set()
         dp = [[[False for _ in range(self.all_blocks)] for _ in range(self.all_blocks)] for _ in range(self.all_blocks)]
         recur_matrix = [[self.matrix[i][j] for j in range(self.R_BOUND)] for i in range(self.R_BOUND)]
-        self._next_3_wkr_gen(res, [], recur_matrix, 1, dp)
+        
+        # see if there is a placement of the permutation that does not result in death
+        for i in range(1, self.all_blocks):
+            for j in range(i, self.all_blocks):
+                for k in range(j, self.all_blocks):
+                    if self._validate_choice([i, j, k], recur_matrix, dp):
+                        res.add(tuple([i, j, k]))
         res = list(res)
         choice = random.choice(res)
-        # with open("choices.log", 'w') as f:
-        #     res.sort()
-        #     f.write(f'{len(res)}\n')
-        #     f.write(res.__str__())
-        #     f.write('\n')
         self.choices = list(choice)
         
-    def perform_action(self, b, x, y):
+    def perform_action(self, b: int, x: int, y: int):
         b -= 1
         x -= 1
         y -= 1
