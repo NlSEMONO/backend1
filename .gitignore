@@ -1,0 +1,6 @@
+xD
+*.log
+*.txt
+*.out
+tmp*
+__pycache__

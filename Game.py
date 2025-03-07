@@ -172,6 +172,8 @@ class Game:
                 # don't compute if success for 3 chosen blocks alr exists
                 if len(arr) == 2 and dp[arr[0]][arr[1]][k]:
                     continue
+                elif len(arr) == 1 and dp[arr[0]][k][0]:
+                    continue
                 
                 # compute all possible locations of next block
                 for i in range(self.R_BOUND):
@@ -190,13 +192,28 @@ class Game:
                             if rr:
                                 i = self.R_BOUND
                                 j = self.R_BOUND
+
+            # update dp
+            if len(arr) > 0:
+                first_zero = len(arr)
+                if first_zero == 1:
+                    dp[arr[0]][0][0] = all([dp[arr[0]][k][0] for k in range(idx, self.all_blocks)])
+                elif first_zero == 2:
+                    dp[arr[0]][arr[1]][0] =  all([dp[arr[0]][arr[1]][k] for k in range(idx, self.all_blocks)])
+                    
         
     def _get_next_3(self):
         res = set()
         dp = [[[False for _ in range(self.all_blocks)] for _ in range(self.all_blocks)] for _ in range(self.all_blocks)]
         recur_matrix = [[self.matrix[i][j] for j in range(self.R_BOUND)] for i in range(self.R_BOUND)]
         self._next_3_wkr_gen(res, [], recur_matrix, 1, dp)
-        choice = random.choice(list(res))
+        res = list(res)
+        choice = random.choice(res)
+        # with open("choices.log", 'w') as f:
+        #     res.sort()
+        #     f.write(f'{len(res)}\n')
+        #     f.write(res.__str__())
+        #     f.write('\n')
         self.choices = list(choice)
         
     def perform_action(self, b, x, y):
