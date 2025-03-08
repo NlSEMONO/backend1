@@ -1,8 +1,12 @@
 import random
 
+# grid = game state
 type grid = list[list[bool]]
+# turn = choice of 3 blocks
 type turn = tuple[int, int, int]
+# move = set of parameters to be fed into perform_action (think of this as placing a block)
 type move = tuple[int, int, int]
+# sequence = 3 moves defining the way each turn block should be used to proceed to next grid
 type sequence = tuple[move, move, move]
 
 class Game:
@@ -38,7 +42,13 @@ class Game:
     ]
     all_blocks = 0
     
-    def _add_rotations(self, block: grid, r: int):
+    def _add_rotations(self, block: grid, r: int) -> None:
+        """Adds the first r rotations of block to self.blocks
+
+        Args:
+            block (grid): the block to be rotated
+            r (int): number of 90 rotations to add to blocks list, starting at 0 degrees
+        """
         tmp = block
         self.blocks.append(block)
         for _ in range(r - 1):
@@ -60,7 +70,7 @@ class Game:
             
         self.all_blocks = len(self.blocks)
     
-    def _print_matrix(self):
+    def _print_matrix(self) -> None:
         c = 0
         for row in self.matrix:
             print(f"{c + 1} " + ' '.join(self.true_symbol if cell else self.false_symbol for cell in row))
@@ -70,10 +80,10 @@ class Game:
             print(f" {i + 1}", end="")
         print()
     
-    def _print_line(self):
+    def _print_line(self) -> None:
         print()
     
-    def _print_blocks(self):
+    def _print_blocks(self) -> None:
         m = max([len(self.blocks[c]) for c in self.choices])
         size = 6
         for i in range(m):
@@ -95,13 +105,27 @@ class Game:
             print_str += " " * (buf // 2) + f"{i + 1}" + " " * ((buf // 2) + (buf % 2))
         print(print_str)
         
-    def _copy_matrix(self):
+    def _copy_matrix(self) -> grid:
+        """
+        Returns a copy of self.matrix
+
+        Returns:
+            grid: A copy of self.matrix
+        """
         return [[self.matrix[i][j] for j in range(self.R_BOUND)] for i in range(self.R_BOUND)]
     
-    def is_done(self):
+    def is_done(self) -> bool:
+        self._copy_matrix
         return self._is_done
     
-    def _remove_block(self, b: int, x: int, y: int, matrix: grid):
+    def _remove_block(self, b: int, x: int, y: int, matrix: grid) -> None:
+        """
+        Args:
+            b (int): block index inside self.blocks
+            x (int): top left y-coordinate placement location of the block
+            y (int): top left x-coordinate placement location of the block
+            matrix (grid): the matrix to remove the block from
+        """
         n = len(self.blocks[b])
         m = len(self.blocks[b][0])
         for i in range(n):
@@ -109,7 +133,14 @@ class Game:
                 if self.blocks[b][i][j]:
                     matrix[i+x][j+y] = False
     
-    def _place_block(self, b: int, x: int, y: int, matrix: grid):
+    def _place_block(self, b: int, x: int, y: int, matrix: grid) -> None:
+        """
+        Args:
+            b (int): block index to be placed
+            x (int): top left y-coordinate placement location of the block
+            y (int): top left x-coordinate placement location of the block
+            matrix (grid): the matrix to place the block into
+        """
         n = len(self.blocks[b])
         m = len(self.blocks[b][0])
         for i in range(n):
@@ -117,7 +148,18 @@ class Game:
                 if self.blocks[b][i][j]:
                     matrix[i+x][j+y] = True
     
-    def _validate_action(self, b: int, x: int, y: int, matrix: grid, print_error = True):
+    def _validate_action(self, b: int, x: int, y: int, matrix: grid, print_error = True) -> bool:
+        """
+        Args:
+            b (int): block index to be placed
+            x (int): top left y-coordinate placement location of the block
+            y (int): top left x-coordinate placement location of the block
+            matrix (grid): matrix to place the block into
+            print_error (bool, optional): Print errors? Defaults to True
+
+        Returns:
+            bool: Valid to place block at (y, x) or not?
+        """
         if x < self.L_BOUND or x >= self.R_BOUND or y < self.L_BOUND or y >= self.R_BOUND:
             if (print_error):
                 print("Invalid coordinates.")
@@ -140,7 +182,15 @@ class Game:
                 
         return True
     
-    def _remove_rows_and_cols(self, matrix: grid):
+    def _remove_rows_and_cols(self, matrix: grid) -> list[list[int]]:
+        """Removes completed rows and columns from matrix
+
+        Args:
+            matrix (grid): matrix to remove rows and columns from
+
+        Returns:
+            list[list[int]]: the rows and columns that got removed
+        """
         # track rows and cols removed
         r = []
         c = []
@@ -162,7 +212,14 @@ class Game:
                 
         return [r, c]
     
-    def _add_rows_and_cols(self, r: int, c: int , m: grid):
+    def _add_rows_and_cols(self, r: list[int], c: list[int] , m: grid) -> None:
+        """Opposite operation of _remove_rows_and_cols
+
+        Args:
+            r (list[int]): rows to add back
+            c (list[int]): columns add back
+            m (grid): matrix to add rows/cols back into
+        """
         for row in r:
             for i in range(self.R_BOUND):
                 m[row][i] = True
@@ -170,7 +227,16 @@ class Game:
             for i in range(self.R_BOUND):
                 m[i][col] = True
     
-    def _gen_perms(self, nums: list[int], perm_so_far: list[int], used: set[int]):
+    def _gen_perms(self, nums: list[int], perm_so_far: list[int], used: set[int]) -> set[tuple[turn]]:
+        """
+        Args:
+            nums (list[int]): Turn as a list
+            perm_so_far (list[int]): Accumulator variable for permutation so far
+            used (set[int]): Set for tracking which numbers have already been used
+
+        Returns:
+            set[tuple[turn]]: All possible orders to play the turn
+        """
         res = set()
         # valid permutation, add result
         if len(nums) == len(perm_so_far):
@@ -186,7 +252,7 @@ class Game:
                 perm_so_far.pop()
         return res
     
-    def _validate_choice_wkr(self, blks: list[int], m: grid, idx: int):
+    def _validate_choice_wkr(self, blks: list[int], m: grid, idx: int) -> bool:
         if idx == 3:
             return True
         for i in range(self.R_BOUND):
@@ -200,7 +266,15 @@ class Game:
                     return True
         return False
     
-    def _validate_choice(self, blks: list[int], m: grid):
+    def _validate_choice(self, blks: list[int], m: grid) -> bool:
+        """
+        Args:
+            blks (list[int]): Turn to validate
+            m (grid): matrix to perform validation in
+
+        Returns:
+            bool: Does there exist a sequence of moves to get through the turn?
+        """
         used = set()
         perms = self._gen_perms(blks, [], used)
         for perm in perms:
@@ -238,7 +312,7 @@ class Game:
                     self._remove_block(perm[idx], i, j, m)
         return options
     
-    def _get_best_turn(self):
+    def _get_best_sequence(self):
         used = set()
         perms = self._gen_perms(self.choices, [], used)
         options = []
