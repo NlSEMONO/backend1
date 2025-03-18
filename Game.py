@@ -68,16 +68,16 @@ class Game:
                     tmp2[j][n-i-1] = tmp[i][j]
             tmp = tmp2
             self.blocks.append(tmp)
-    
+
     def __init__(self):
         for block in self.perms_2:
             self._add_rotations(block, 2)
 
         for block in self.perms_4:
             self._add_rotations(block, 4)
-            
+        
         self.all_blocks = len(self.blocks)
-    
+
     def _print_matrix(self) -> None:
         c = 0
         for row in self.matrix:
@@ -87,12 +87,12 @@ class Game:
         for i in range(self.R_BOUND):
             print(f" {i + 1}", end="")
         print()
-    
+
     def _print_line(self) -> None:
         print()
-    
+
     def _print_blocks(self) -> None:
-        m = max([len(self.blocks[c]) for c in self.choices])
+        m = max(len(self.blocks[c]) for c in self.choices)
         size = 6
         for i in range(m):
             print_str = ""
@@ -112,7 +112,7 @@ class Game:
             buf = size
             print_str += " " * (buf // 2) + f"{i + 1}" + " " * ((buf // 2) + (buf % 2))
         print(print_str)
-        
+  
     def _copy_matrix(self) -> Grid:
         """
         Returns a copy of self.matrix
@@ -121,14 +121,14 @@ class Game:
             Grid: A copy of self.matrix
         """
         return [[self.matrix[i][j] for j in range(self.R_BOUND)] for i in range(self.R_BOUND)]
-    
+
     def is_done(self) -> bool:
         """
         Returns:
             bool: Is the game done or not?
         """
         return self._is_done
-    
+
     def _remove_block(self, b: int, x: int, y: int, matrix: Grid) -> None:
         """
         Args:
@@ -143,7 +143,7 @@ class Game:
             for j in range(m): 
                 if self.blocks[b][i][j]:
                     matrix[i+x][j+y] = False
-    
+
     def _place_block(self, b: int, x: int, y: int, matrix: Grid) -> None:
         """
         Args:
@@ -158,7 +158,7 @@ class Game:
             for j in range(m):
                 if self.blocks[b][i][j]:
                     matrix[i+x][j+y] = True
-    
+
     def _validate_action(self, b: int, x: int, y: int, matrix: Grid, print_error = True) -> bool:
         """
         Args:
@@ -183,16 +183,16 @@ class Game:
                 if not self.blocks[b][i][j]:
                     continue
                 elif i + x >= self.R_BOUND or j + y >= self.R_BOUND:
-                    if (print_error):
+                    if print_error:
                         print("Could not place block there :(")
                     return False
                 elif matrix[i+x][j+y] and self.blocks[b][i][j]:
                     if print_error:
                         print("Space already occupied :(")
                     return False
-                
+
         return True
-    
+
     def _remove_rows_and_cols(self, matrix: Grid) -> list[list[int]]:
         """Removes completed rows and columns from matrix
 
@@ -216,13 +216,13 @@ class Game:
         for row in r:
             for i in range(self.R_BOUND):
                 matrix[row][i] = False
-                
+ 
         for col in c:
             for i in range(self.R_BOUND):
                 matrix[i][col] = False
-                
-        return [r, c]
     
+        return [r, c]
+
     def _add_rows_and_cols(self, r: list[int], c: list[int] , m: Grid) -> None:
         """Opposite operation of _remove_rows_and_cols
 
@@ -237,7 +237,7 @@ class Game:
         for col in c:
             for i in range(self.R_BOUND):
                 m[i][col] = True
-    
+
     def _gen_perms(self, nums: list[int], perm_so_far: list[int], used: set[int]) -> set[tuple[int, int, int]]:
         """
         Args:
@@ -263,7 +263,7 @@ class Game:
                 perm_so_far.pop()
                 used.remove(i)
         return res
-    
+
     def _validate_choice_wkr(self, blks: list[int], m: Grid, idx: int) -> bool:
         if idx == 3:
             return True
@@ -277,7 +277,7 @@ class Game:
                     self._remove_block(blks[idx], i, j, m)
                     return True
         return False
-    
+
     def _validate_choice(self, blks: list[int], m: Grid) -> bool:
         """
         Args:
@@ -293,11 +293,11 @@ class Game:
             if self._validate_choice_wkr(list(perm), m, 0):
                 return True
         return False
-    
+
     def _gen_liveable_choices(self, matrix: Grid) -> set[tuple[int, int, int]]:
         res = set()
         recur_matrix = [[matrix[i][j] for j in range(self.R_BOUND)] for i in range(self.R_BOUND)]
-        
+
         # see if there is a placement of the permutation that does not result in death
         for i in range(1, self.all_blocks):
             for j in range(i, self.all_blocks):
@@ -305,12 +305,12 @@ class Game:
                     if self._validate_choice([i, j, k], recur_matrix):
                         res.add((i, j, k))
         return res
-        
+  
     def _get_next_3(self):
         res = list(self._gen_liveable_choices(self.matrix))
         choice = random.choice(res)
         self.choices = list(choice)
-    
+
     def _get_sequences(self, perm: Turn, idx: int, m: Grid, seq_so_far: list[Move]) -> list[Sequence]:
         if idx == len(perm):
             return [tuple(seq_so_far)]
@@ -326,7 +326,7 @@ class Game:
                     self._add_rows_and_cols(r, c, m)
                     self._remove_block(perm[idx], i, j, m)
         return options
-    
+
     def _get_placed_state(self, seq: Sequence, matrix: Grid) -> tuple[int, bool, list[tuple[list[int], list[int]]]]:
         tmp_combo = self._combo
         broke_combo = False
@@ -338,12 +338,12 @@ class Game:
             broke_combo = broke_combo or tmp_combo == 0
             rc_arr.append((r, c))
         return (tmp_combo, broke_combo, rc_arr)
-    
+
     def _undo_placed_state(self, seq: Sequence, matrix: Grid, rc_arr: list[tuple[list[int], list[int]]]) -> None:
         for i in range(len(seq) - 1, -1, -1):
             self._add_rows_and_cols(rc_arr[i][0], rc_arr[i][1], matrix)
             self._remove_block(seq[i][0], seq[i][1], seq[i][2], matrix)
-    
+
     def _combo_maintained(self, matrix: Grid, combo: int, perm: tuple[int, int, int], idx: int):
         if idx == 3:
             return True
@@ -359,9 +359,9 @@ class Game:
                             return True
                     self._add_rows_and_cols(r, c, matrix)
                     self._remove_block(perm[idx], i, j, matrix)
-                    
+
         return False
-    
+
     def _assess_state(self, matrix: Grid, combo: int):
         no_break = 0
         res = self._gen_liveable_choices(matrix)
@@ -372,8 +372,7 @@ class Game:
                     no_break += 1
                     break
         return no_break / len(res)
-                    
-    
+
     def _get_best_turn(self):
         perms = self._gen_perms(self.choices, [], set())
         options = []
@@ -383,7 +382,7 @@ class Game:
         best = [True, 0]
         best_opt = options[0]
         done_so_far = 0
-        
+
         # apply each Sequence
         for option in options:
             tmp_combo, broke_combo, rc_arr = self._get_placed_state(option, m)
@@ -396,7 +395,7 @@ class Game:
             done_so_far += 1
             # if done_so_far % 50 == 0:
             print(f'{done_so_far} / {len(options)} done so far')
-            
+
         return best_opt
 
     def perform_action(self, b: int, x: int, y: int):
@@ -406,13 +405,13 @@ class Game:
         if b >= 3 or b < 0:
             print("Invalid block selected")
             return
-        
+  
         if self._validate_action(self.choices[b], x, y, self.matrix):
             self._place_block(self.choices[b], x, y, self.matrix)
             self.choices[b] = 0
             r, c = self._remove_rows_and_cols(self.matrix)
             self._combo = self._adjust_combo(self._combo, r, c)
-            
+   
     def print_state(self):
         if all(c == 0 for c in self.choices):
             self._get_next_3()
