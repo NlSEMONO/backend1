@@ -2,8 +2,11 @@
 Contains methods to help simulate block blast and judge block blast moves
 """
 from numba import njit, prange
+import numba
 import numpy as np
 import random
+
+print(numba.set_num_threads(8))
 
 R_BOUND = 8
 L_BOUND = 0
