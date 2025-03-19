@@ -4,3 +4,4 @@ xD
 *.out
 tmp*
 __pycache__
+benchmark.py

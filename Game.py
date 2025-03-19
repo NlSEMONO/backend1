@@ -1,10 +1,50 @@
 """
 Contains methods to help simulate block blast and judge block blast moves
 """
+from numba import njit, types
+import numpy as np
+import copy
 import random
 
+R_BOUND = 8
+L_BOUND = 0
+PADDING = 100
+all_blocks = 0
+BLOCK_LEN = 9
+
+def _normalize(lst: list[int]):
+    return lst + [PADDING for _ in range(BLOCK_LEN - len(lst))]
+
+def _normalize_np_arr(arr: np.ndarray):
+    return np.append(arr, [PADDING for _ in range(BLOCK_LEN - arr.shape[0])])
+
+blocks = np.array([
+    _normalize([]), # padding
+    _normalize([8 * j + i for i in range(3) for j in range(3)]), # 3x3
+    _normalize([8 * j + i for i in range(2) for j in range(2)]), # 2x2
+])
+
+@njit
+def _adjust_combo(combo: int, r: np.ndarray, c: np.ndarray):
+    return 3 if r.shape[0] + c.shape[0] > 0 else max(0, combo - 1)
+
+def _add_rotations(block: np.ndarray, r: int) -> None:
+    """Adds the first r rotations of block to self.blocks
+
+    Args:
+        block (Grid): the block to be rotated
+        r (int): number of 90 rotations to add to blocks list, starting at 0 degrees
+    """
+    globals()['blocks'] = np.append(blocks, [block], axis = 0)
+    tmp = block[block < PADDING]
+    for _ in range(r - 1):
+        n = np.max(tmp // 8)
+        tmp2 = 8 * (tmp % 8) + n - (tmp // 8)
+        tmp = tmp2
+        globals()['blocks'] = np.append(blocks, [_normalize_np_arr(tmp)], axis=0)
+
 # Grid = game state
-type Grid = list[list[bool]]
+type Grid = np.ndarray
 # Turn = choice of 3 blocks
 type Turn = tuple[int, int, int]
 # move = set of parameters to be fed into perform_action (think of this as placing a block)
@@ -12,71 +52,189 @@ type Move = tuple[int, int, int]
 # Sequence = 3 moves defining the way each Turn block should be used to proceed to next Grid
 type Sequence = tuple[Move, Move, Move]
 
+@njit
+def _remove_block(b: int, x: int, y: int, matrix: Grid) -> None:
+    """
+    Args:
+        b (int): block index inside self.blocks
+        x (int): top left y-coordinate placement location of the block
+        y (int): top left x-coordinate placement location of the block
+        matrix (Grid): the matrix to remove the block from
+    """
+    for j in blocks[b][blocks[b] < PADDING]:
+        matrix[j // 8 + x][j % 8 + y] = False
+
+@njit
+def _place_block(b: int, x: int, y: int, matrix: Grid) -> None:
+    """
+    Args:
+        b (int): block index to be placed
+        x (int): top left y-coordinate placement location of the block
+        y (int): top left x-coordinate placement location of the block
+        matrix (Grid): the matrix to place the block into
+    """
+    for j in blocks[b][blocks[b] < PADDING]:
+        matrix[j // 8 + x][j % 8 + y] = True
+
+@njit
+def _validate_action(b: int, x: int, y: int, matrix: Grid, print_error = True) -> bool:
+    """
+    Args:
+        b (int): block index to be placed
+        x (int): top left y-coordinate placement location of the block
+        y (int): top left x-coordinate placement location of the block
+        matrix (Grid): matrix to place the block into
+        print_error (bool, optional): Print errors? Defaults to True
+
+    Returns:
+        bool: Valid to place block at (y, x) or not?
+    """
+    if x < L_BOUND or x >= R_BOUND or y < L_BOUND or y >= R_BOUND:
+        if (print_error):
+            print("Invalid coordinates.")
+            return False
+
+    for j in blocks[b][blocks[b] < PADDING]:
+        if j // 8 + x >= R_BOUND or j % 8 + y >= R_BOUND:
+            return False
+        elif matrix[j // 8 + x][j % 8 + y]:
+            return False
+
+    return True
+
+@njit
+def _remove_rows_and_cols(matrix: Grid) -> list[np.ndarray]:
+    """Removes completed rows and columns from matrix
+
+    Args:
+        matrix (Grid): matrix to remove rows and columns from
+
+    Returns:
+        list[list[int]]: the rows and columns that got removed
+    """
+    # track rows and cols removed
+    r = np.array([np.all(matrix[i] == True) for i in range(R_BOUND)])
+    c = np.array([np.all(matrix[:,i] == True) for i in range(R_BOUND)])
+
+    # reset rows and cols
+    for i in range(R_BOUND):
+        if r[i]:
+            matrix[i] &= False
+
+    for i in range(R_BOUND):
+        if c[i]:
+            matrix[:,i] &= False
+
+    return [r, c]
+
+@njit
+def _add_rows_and_cols(r: list[int], c: list[int] , m: Grid) -> None:
+    """Opposite operation of _remove_rows_and_cols
+
+    Args:
+        r (list[int]): rows to add back
+        c (list[int]): columns add back
+        m (Grid): matrix to add rows/cols back into
+    """
+    for i in range(R_BOUND):
+        if r[i]:
+            m[i] |= True
+    for i in range(R_BOUND):
+        if c[i]:
+            m[:,i] |= True
+        
+@njit
+def _validate_choice_wkr(blks: list[int], m: Grid, idx: int) -> bool:
+    if idx == 3:
+        return True
+    for i in range(R_BOUND):
+        for j in range(R_BOUND):
+            if _validate_action(blks[idx], i, j, m, False):
+                _place_block(blks[idx], i, j, m)
+                r, c = _remove_rows_and_cols(m)
+                _validate_choice_wkr(blks, m, idx + 1)
+                _add_rows_and_cols(r, c, m)
+                _remove_block(blks[idx], i, j, m)
+                return True
+    return False
+
+@njit
+def _gen_perms(nums: list[int], perm_so_far: list[int], used: set[int], idx: int) -> set[tuple[int, int, int]]:
+    """
+    Args:
+        nums (list[int]): Turn as a list
+        perm_so_far (list[int]): Accumulator variable for permutation so far
+        used (set[int]): Set for tracking which numbers have already been used
+
+    Returns:
+        set[tuple[int, int, int]]: All possible orders to play the Turn
+    """
+    res = set()
+    # valid permutation, add result
+    if idx == 3:
+        res.add((perm_so_far[0], perm_so_far[1], perm_so_far[2]))
+        return res
+    # recurse
+    n = len(nums)
+    for i in range(n):
+        if i not in used:
+            used.add(i)
+            perm_so_far[idx] = nums[i]
+            res = res.union(_gen_perms(nums, perm_so_far, used, idx + 1))
+            perm_so_far[idx] = -1
+            used.remove(i)
+    return res
+
+@njit
+def _validate_choice(blks: list[int], m: Grid) -> bool:
+    """
+    Args:
+        blks (list[int]): Turn to validate
+        m (Grid): matrix to perform validation in
+
+    Returns:
+        bool: Does there exist a Sequence of moves to get through the Turn?
+    """
+    perms = _gen_perms(blks, [-1, -1, -1], {76, 69}, 0)
+    for perm in perms:
+        if _validate_choice_wkr(perm, m, 0):
+            return True
+    return False
+
 class Game:
     """Methods to run a game of block blast
     """
-    R_BOUND = 8
-    L_BOUND = 0
-    matrix = [[False for _ in range(8)] for _ in range(8)]
+    matrix = np.array([[False for _ in range(8)] for _ in range(8)])
     _is_done = False
     true_symbol='#'
     false_symbol='.'
     choices = [0, 0, 0]
     _combo = 0
-    perms_2 = [
-        [[True for _ in range(5)]], # 1x5
-        [[True for _ in range(4)]], # 1x4
-        [[True for _ in range(3)]], # 1x3
-        [[True for _ in range(2)]], # 1x2
-        [[j == i for j in range(3)] for i in range(3)], # staircase
-        [[True, False], [True, True], [False, True]], # Z-shape 0
-        [[False, True], [True, True], [True, False]], # Z-shape reflect 0
-        [[True for _ in range(3)] for _ in range(2)], # 2x3
-    ]
-    perms_4 = [
-        [[True, True, True], [False, True, False]], # T-shape 0
-        [[True, False], [True, False], [True, True]], # L-shape 0
-        [[False,True], [False,True], [True, True]], # L-shape reflect 0
-        [[True, False, False], [True, False, False], [True, True, True]], # L-shape big 0
-        
-    ]
-    blocks = [
-        [[]], # padding
-        [[True, True, True]] * 3, # 3x3
-        [[True, True]] * 2, # 2x2
-    ]
-    all_blocks = 0
-    
-    def _adjust_combo(self, combo: int, r: list[int], c: list[int]):
-        return 3 if len(r) + len(c) > 0 else max(0, combo - 1)
-    
-    def _add_rotations(self, block: Grid, r: int) -> None:
-        """Adds the first r rotations of block to self.blocks
-
-        Args:
-            block (Grid): the block to be rotated
-            r (int): number of 90 rotations to add to blocks list, starting at 0 degrees
-        """
-        tmp = block
-        self.blocks.append(block)
-        for _ in range(r - 1):
-            n = len(tmp)
-            m = len(tmp[0])
-            tmp2 = [[False for _ in range(n)] for _ in range(m)]
-            for i in range(n):
-                for j in range(m):
-                    tmp2[j][n-i-1] = tmp[i][j]
-            tmp = tmp2
-            self.blocks.append(tmp)
+    perms_2 = np.array([
+        _normalize([i for i in range(5)]), # 1x5
+        _normalize([i for i in range(4)]), # 1x4
+        _normalize([i for i in range(3)]), # 1x3
+        _normalize([i for i in range(2)]), # 1x2
+        _normalize([0,9,18]), # staircase
+        _normalize([0,8,9,17]), # Z-shape 0
+        _normalize([1,8,9,16]), # Z-shape reflect 0
+        _normalize([8 * j + i for i in range(3) for j in range(2)]), # 2x3
+    ], np.uint8)
+    perms_4 = np.array([
+        _normalize([0,1,2,9]), # T-shape 0
+        _normalize([0,8,16,17]), # L-shape 0
+        _normalize([1,9,16,17]), # L-shape reflect 0
+        _normalize([0,8,16,17,18]), # L-shape big 0
+    ], np.uint8)
 
     def __init__(self):
         for block in self.perms_2:
-            self._add_rotations(block, 2)
+            _add_rotations(block, 2)
 
         for block in self.perms_4:
-            self._add_rotations(block, 4)
+            _add_rotations(block, 4)
         
-        self.all_blocks = len(self.blocks)
+        globals()['all_blocks'] = blocks.shape[0]
 
     def _print_matrix(self) -> None:
         c = 0
@@ -84,7 +242,7 @@ class Game:
             print(f"{c + 1} " + ' '.join(self.true_symbol if cell else self.false_symbol for cell in row))
             c += 1
         print(" ", end="")
-        for i in range(self.R_BOUND):
+        for i in range(R_BOUND):
             print(f" {i + 1}", end="")
         print()
 
@@ -92,17 +250,17 @@ class Game:
         print()
 
     def _print_blocks(self) -> None:
-        m = max(len(self.blocks[c]) for c in self.choices)
+        m = np.max((blocks[self.choices] % PADDING) // 8) + 1
         size = 6
         for i in range(m):
             print_str = ""
             for c in self.choices:
-                if len(self.blocks[c]) > i: 
-                    width = len(self.blocks[c][0])
+                if c > 0 and np.max((blocks[c] % PADDING) // 8) >= i: 
+                    width = np.max(blocks[c][blocks[c] < PADDING] % 8) + 1
                     buf = size - width
                     print_str += " " * (buf // 2)
                     for j in range(width):
-                        print_str += self.true_symbol if self.blocks[c][i][j] else self.false_symbol
+                        print_str += self.true_symbol if any(blocks[c] == 8 * i + j) else self.false_symbol
                     print_str += " " * ((buf // 2) + (buf % 2)) + "|"
                 else:
                     print_str += " " * (size) + "|"
@@ -112,15 +270,6 @@ class Game:
             buf = size
             print_str += " " * (buf // 2) + f"{i + 1}" + " " * ((buf // 2) + (buf % 2))
         print(print_str)
-  
-    def _copy_matrix(self) -> Grid:
-        """
-        Returns a copy of self.matrix
-
-        Returns:
-            Grid: A copy of self.matrix
-        """
-        return [[self.matrix[i][j] for j in range(self.R_BOUND)] for i in range(self.R_BOUND)]
 
     def is_done(self) -> bool:
         """
@@ -129,185 +278,21 @@ class Game:
         """
         return self._is_done
 
-    def _remove_block(self, b: int, x: int, y: int, matrix: Grid) -> None:
-        """
-        Args:
-            b (int): block index inside self.blocks
-            x (int): top left y-coordinate placement location of the block
-            y (int): top left x-coordinate placement location of the block
-            matrix (Grid): the matrix to remove the block from
-        """
-        n = len(self.blocks[b])
-        m = len(self.blocks[b][0])
-        for i in range(n):
-            for j in range(m): 
-                if self.blocks[b][i][j]:
-                    matrix[i+x][j+y] = False
-
-    def _place_block(self, b: int, x: int, y: int, matrix: Grid) -> None:
-        """
-        Args:
-            b (int): block index to be placed
-            x (int): top left y-coordinate placement location of the block
-            y (int): top left x-coordinate placement location of the block
-            matrix (Grid): the matrix to place the block into
-        """
-        n = len(self.blocks[b])
-        m = len(self.blocks[b][0])
-        for i in range(n):
-            for j in range(m):
-                if self.blocks[b][i][j]:
-                    matrix[i+x][j+y] = True
-
-    def _validate_action(self, b: int, x: int, y: int, matrix: Grid, print_error = True) -> bool:
-        """
-        Args:
-            b (int): block index to be placed
-            x (int): top left y-coordinate placement location of the block
-            y (int): top left x-coordinate placement location of the block
-            matrix (Grid): matrix to place the block into
-            print_error (bool, optional): Print errors? Defaults to True
-
-        Returns:
-            bool: Valid to place block at (y, x) or not?
-        """
-        if x < self.L_BOUND or x >= self.R_BOUND or y < self.L_BOUND or y >= self.R_BOUND:
-            if (print_error):
-                print("Invalid coordinates.")
-                return False
-        n = len(self.blocks[b])
-        m = len(self.blocks[b][0])
-
-        for i in range(n):
-            for j in range(m):
-                if not self.blocks[b][i][j]:
-                    continue
-                elif i + x >= self.R_BOUND or j + y >= self.R_BOUND:
-                    if print_error:
-                        print("Could not place block there :(")
-                    return False
-                elif matrix[i+x][j+y] and self.blocks[b][i][j]:
-                    if print_error:
-                        print("Space already occupied :(")
-                    return False
-
-        return True
-
-    def _remove_rows_and_cols(self, matrix: Grid) -> list[list[int]]:
-        """Removes completed rows and columns from matrix
-
-        Args:
-            matrix (Grid): matrix to remove rows and columns from
-
-        Returns:
-            list[list[int]]: the rows and columns that got removed
-        """
-        # track rows and cols removed
-        r = []
-        c = []
-        for i in range(self.R_BOUND):
-            if all(matrix[i]):
-                r.append(i)
-        for i in range(self.R_BOUND):
-            if all([matrix[j][i] for j in range(self.R_BOUND)]):
-                c.append(i)
-
-        # reset rows and cols
-        for row in r:
-            for i in range(self.R_BOUND):
-                matrix[row][i] = False
- 
-        for col in c:
-            for i in range(self.R_BOUND):
-                matrix[i][col] = False
-    
-        return [r, c]
-
-    def _add_rows_and_cols(self, r: list[int], c: list[int] , m: Grid) -> None:
-        """Opposite operation of _remove_rows_and_cols
-
-        Args:
-            r (list[int]): rows to add back
-            c (list[int]): columns add back
-            m (Grid): matrix to add rows/cols back into
-        """
-        for row in r:
-            for i in range(self.R_BOUND):
-                m[row][i] = True
-        for col in c:
-            for i in range(self.R_BOUND):
-                m[i][col] = True
-
-    def _gen_perms(self, nums: list[int], perm_so_far: list[int], used: set[int]) -> set[tuple[int, int, int]]:
-        """
-        Args:
-            nums (list[int]): Turn as a list
-            perm_so_far (list[int]): Accumulator variable for permutation so far
-            used (set[int]): Set for tracking which numbers have already been used
-
-        Returns:
-            set[tuple[int, int, int]]: All possible orders to play the Turn
-        """
-        res = set()
-        # valid permutation, add result
-        if len(nums) == len(perm_so_far):
-            res.add(tuple(perm_so_far))
-            return res
-        # recurse
-        n = len(nums)
-        for i in range(n):
-            if i not in used:
-                used.add(i)
-                perm_so_far.append(nums[i])
-                res = res.union(self._gen_perms(nums, perm_so_far, used))
-                perm_so_far.pop()
-                used.remove(i)
-        return res
-
-    def _validate_choice_wkr(self, blks: list[int], m: Grid, idx: int) -> bool:
-        if idx == 3:
-            return True
-        for i in range(self.R_BOUND):
-            for j in range(self.R_BOUND):
-                if self._validate_action(blks[idx], i, j, m, False):
-                    self._place_block(blks[idx], i, j, m)
-                    r, c = self._remove_rows_and_cols(m)
-                    self._validate_choice_wkr(blks, m, idx + 1)
-                    self._add_rows_and_cols(r, c, m)
-                    self._remove_block(blks[idx], i, j, m)
-                    return True
-        return False
-
-    def _validate_choice(self, blks: list[int], m: Grid) -> bool:
-        """
-        Args:
-            blks (list[int]): Turn to validate
-            m (Grid): matrix to perform validation in
-
-        Returns:
-            bool: Does there exist a Sequence of moves to get through the Turn?
-        """
-        used = set()
-        perms = self._gen_perms(blks, [], used)
-        for perm in perms:
-            if self._validate_choice_wkr(list(perm), m, 0):
-                return True
-        return False
-
     def _gen_liveable_choices(self, matrix: Grid) -> set[tuple[int, int, int]]:
         res = set()
-        recur_matrix = [[matrix[i][j] for j in range(self.R_BOUND)] for i in range(self.R_BOUND)]
+        recur_matrix = copy.deepcopy(matrix) # np.array([[matrix[i][j] for j in range(R_BOUND)] for i in range(R_BOUND)])
 
         # see if there is a placement of the permutation that does not result in death
-        for i in range(1, self.all_blocks):
-            for j in range(i, self.all_blocks):
-                for k in range(j, self.all_blocks):
-                    if self._validate_choice([i, j, k], recur_matrix):
+        for i in range(1, all_blocks):
+            for j in range(i, all_blocks):
+                for k in range(j, all_blocks):
+                    if _validate_choice([i, j, k], recur_matrix):
                         res.add((i, j, k))
         return res
   
     def _get_next_3(self):
         res = list(self._gen_liveable_choices(self.matrix))
+        print(len(res))
         choice = random.choice(res)
         self.choices = list(choice)
 
@@ -315,16 +300,16 @@ class Game:
         if idx == len(perm):
             return [tuple(seq_so_far)]
         options = []
-        for i in range(self.R_BOUND):
-            for j in range(self.R_BOUND):
-                if self._validate_action(perm[idx], i, j, m, False):
-                    self._place_block(perm[idx], i, j, m)
-                    r, c = self._remove_rows_and_cols(m)
+        for i in range(R_BOUND):
+            for j in range(R_BOUND):
+                if _validate_action(perm[idx], i, j, m, False):
+                    _place_block(perm[idx], i, j, m)
+                    r, c = _remove_rows_and_cols(m)
                     seq_so_far.append((perm[idx], i, j))
                     options.extend(self._get_sequences(perm, idx + 1, m, seq_so_far))
                     seq_so_far.pop()
-                    self._add_rows_and_cols(r, c, m)
-                    self._remove_block(perm[idx], i, j, m)
+                    _add_rows_and_cols(r, c, m)
+                    _remove_block(perm[idx], i, j, m)
         return options
 
     def _get_placed_state(self, seq: Sequence, matrix: Grid) -> tuple[int, bool, list[tuple[list[int], list[int]]]]:
@@ -332,33 +317,33 @@ class Game:
         broke_combo = False
         rc_arr = []
         for move in seq:
-            self._place_block(move[0], move[1], move[2], matrix)
-            r, c = self._remove_rows_and_cols(matrix)
-            tmp_combo = self._adjust_combo(tmp_combo, r, c)
+            _place_block(move[0], move[1], move[2], matrix)
+            r, c = _remove_rows_and_cols(matrix)
+            tmp_combo = _adjust_combo(tmp_combo, r, c)
             broke_combo = broke_combo or tmp_combo == 0
             rc_arr.append((r, c))
         return (tmp_combo, broke_combo, rc_arr)
 
     def _undo_placed_state(self, seq: Sequence, matrix: Grid, rc_arr: list[tuple[list[int], list[int]]]) -> None:
         for i in range(len(seq) - 1, -1, -1):
-            self._add_rows_and_cols(rc_arr[i][0], rc_arr[i][1], matrix)
-            self._remove_block(seq[i][0], seq[i][1], seq[i][2], matrix)
+            _add_rows_and_cols(rc_arr[i][0], rc_arr[i][1], matrix)
+            _remove_block(seq[i][0], seq[i][1], seq[i][2], matrix)
 
     def _combo_maintained(self, matrix: Grid, combo: int, perm: tuple[int, int, int], idx: int):
         if idx == 3:
             return True
-        for i in range(self.R_BOUND):
-            for j in range(self.R_BOUND):
+        for i in range(R_BOUND):
+            for j in range(R_BOUND):
                 tmp_combo = combo
-                if self._validate_action(perm[idx], i, j, matrix, False):
-                    self._place_block(perm[idx], i, j, matrix)
-                    r, c = self._remove_rows_and_cols(matrix)
-                    tmp_combo = self._adjust_combo(tmp_combo, r, c)
+                if _validate_action(perm[idx], i, j, matrix, False):
+                    _place_block(perm[idx], i, j, matrix)
+                    r, c = _remove_rows_and_cols(matrix)
+                    tmp_combo = _adjust_combo(tmp_combo, r, c)
                     if tmp_combo > 0:
                         if self._combo_maintained(matrix, tmp_combo, perm, idx + 1):
                             return True
-                    self._add_rows_and_cols(r, c, matrix)
-                    self._remove_block(perm[idx], i, j, matrix)
+                    _add_rows_and_cols(r, c, matrix)
+                    _remove_block(perm[idx], i, j, matrix)
 
         return False
 
@@ -366,7 +351,7 @@ class Game:
         no_break = 0
         res = self._gen_liveable_choices(matrix)
         for choice in res:
-            perms = self._gen_perms(list(choice), [], set())
+            perms = _gen_perms(list(choice), [], set())
             for perm in perms:
                 if self._combo_maintained(matrix, combo, perm, 0):
                     no_break += 1
@@ -374,9 +359,9 @@ class Game:
         return no_break / len(res)
 
     def _get_best_turn(self):
-        perms = self._gen_perms(self.choices, [], set())
+        perms = _gen_perms(self.choices, [], set())
         options = []
-        m = self._copy_matrix()
+        m = copy.deepcopy(self.matrix)
         for perm in perms:
             options.extend(self._get_sequences(perm, 0, m, []))
         best = [True, 0]
@@ -406,15 +391,19 @@ class Game:
             print("Invalid block selected")
             return
   
-        if self._validate_action(self.choices[b], x, y, self.matrix):
-            self._place_block(self.choices[b], x, y, self.matrix)
+        if _validate_action(self.choices[b], x, y, self.matrix):
+            _place_block(self.choices[b], x, y, self.matrix)
             self.choices[b] = 0
-            r, c = self._remove_rows_and_cols(self.matrix)
-            self._combo = self._adjust_combo(self._combo, r, c)
+            r, c = _remove_rows_and_cols(self.matrix)
+            self._combo = _adjust_combo(self._combo, r, c)
    
     def print_state(self):
         if all(c == 0 for c in self.choices):
+            from datetime import datetime
+            a = datetime.now()
             self._get_next_3()
+            b = datetime.now()
+            print(b-a)
         self._print_matrix()
         self._print_line()
         self._print_blocks()
