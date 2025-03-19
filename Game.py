@@ -1,9 +1,8 @@
 """
 Contains methods to help simulate block blast and judge block blast moves
 """
-from numba import njit, types
+from numba import njit, prange
 import numpy as np
-import copy
 import random
 
 R_BOUND = 8
@@ -201,6 +200,91 @@ def _validate_choice(blks: list[int], m: Grid) -> bool:
             return True
     return False
 
+@njit
+def _gen_liveable_choices(matrix: Grid) -> set[tuple[int, int, int]]:
+    res = set()
+    recur_matrix = _copy_matrix(matrix)
+
+    # see if there is a placement of the permutation that does not result in death
+    for i in range(1, all_blocks):
+        for j in range(i, all_blocks):
+            for k in range(j, all_blocks):
+                if _validate_choice([i, j, k], recur_matrix):
+                    res.add((i, j, k))
+    return res
+
+@njit
+def _get_sequences(perm: Turn, idx: int, m: Grid, seq_so_far: list[Move]) -> list[Sequence]:
+    if idx == len(perm):
+        return [(seq_so_far[0], seq_so_far[1], seq_so_far[2])]
+    options = []
+    for i in range(R_BOUND):
+        for j in range(R_BOUND):
+            if _validate_action(perm[idx], i, j, m, False):
+                _place_block(perm[idx], i, j, m)
+                r, c = _remove_rows_and_cols(m)
+                seq_so_far[idx] = (perm[idx], i, j)
+                options.extend(_get_sequences(perm, idx + 1, m, seq_so_far))
+                seq_so_far[idx] = (-1, -1, -1)
+                _add_rows_and_cols(r, c, m)
+                _remove_block(perm[idx], i, j, m)
+    return options
+
+@njit
+def _copy_matrix(matrix: Grid):
+    return np.array([[False for _ in range(8)] for _ in range(8)]) | matrix
+
+@njit
+def _get_placed_state(seq: Sequence, matrix: Grid, combo: int) -> tuple[int, bool, list[tuple[list[int], list[int]]]]:
+    broke_combo = False
+    rc_arr = []
+    for move in seq:
+        _place_block(move[0], move[1], move[2], matrix)
+        r, c = _remove_rows_and_cols(matrix)
+        combo = _adjust_combo(combo, r, c)
+        broke_combo = broke_combo or combo == 0
+        rc_arr.append((r, c))
+    return (combo, broke_combo, rc_arr)
+
+@njit
+def _undo_placed_state(seq: Sequence, matrix: Grid, rc_arr: list[tuple[list[int], list[int]]]) -> None:
+    for i in range(len(seq) - 1, -1, -1):
+        _add_rows_and_cols(rc_arr[i][0], rc_arr[i][1], matrix)
+        _remove_block(seq[i][0], seq[i][1], seq[i][2], matrix)
+
+@njit
+def _combo_maintained(matrix: Grid, combo: int, perm: tuple[int, int, int], idx: int):
+    if idx == 3:
+        return True
+    for i in range(R_BOUND):
+        for j in range(R_BOUND):
+            tmp_combo = combo
+            if _validate_action(perm[idx], i, j, matrix, False):
+                _place_block(perm[idx], i, j, matrix)
+                r, c = _remove_rows_and_cols(matrix)
+                tmp_combo = _adjust_combo(tmp_combo, r, c)
+                if tmp_combo > 0:
+                    if _combo_maintained(matrix, tmp_combo, perm, idx + 1):
+                        return True
+                _add_rows_and_cols(r, c, matrix)
+                _remove_block(perm[idx], i, j, matrix)
+
+    return False
+
+@njit(parallel=True)
+def _assess_state(matrix: Grid, combo: int):
+    no_break = 0
+    res = list(_gen_liveable_choices(matrix))
+    n = len(res)
+    for i in prange(n):
+        tmp_matrix = _copy_matrix(matrix)
+        perms = _gen_perms(list(res[i]), [-1, -1, -1], {60, 59}, 0)
+        for perm in perms:
+            if _combo_maintained(tmp_matrix, combo, perm, 0):
+                no_break += 1
+                break
+    return no_break / len(res)
+
 class Game:
     """Methods to run a game of block blast
     """
@@ -277,109 +361,35 @@ class Game:
             bool: Is the game done or not?
         """
         return self._is_done
-
-    def _gen_liveable_choices(self, matrix: Grid) -> set[tuple[int, int, int]]:
-        res = set()
-        recur_matrix = copy.deepcopy(matrix) # np.array([[matrix[i][j] for j in range(R_BOUND)] for i in range(R_BOUND)])
-
-        # see if there is a placement of the permutation that does not result in death
-        for i in range(1, all_blocks):
-            for j in range(i, all_blocks):
-                for k in range(j, all_blocks):
-                    if _validate_choice([i, j, k], recur_matrix):
-                        res.add((i, j, k))
-        return res
   
     def _get_next_3(self):
-        res = list(self._gen_liveable_choices(self.matrix))
+        res = list(_gen_liveable_choices(self.matrix))
         print(len(res))
         choice = random.choice(res)
         self.choices = list(choice)
 
-    def _get_sequences(self, perm: Turn, idx: int, m: Grid, seq_so_far: list[Move]) -> list[Sequence]:
-        if idx == len(perm):
-            return [tuple(seq_so_far)]
-        options = []
-        for i in range(R_BOUND):
-            for j in range(R_BOUND):
-                if _validate_action(perm[idx], i, j, m, False):
-                    _place_block(perm[idx], i, j, m)
-                    r, c = _remove_rows_and_cols(m)
-                    seq_so_far.append((perm[idx], i, j))
-                    options.extend(self._get_sequences(perm, idx + 1, m, seq_so_far))
-                    seq_so_far.pop()
-                    _add_rows_and_cols(r, c, m)
-                    _remove_block(perm[idx], i, j, m)
-        return options
-
-    def _get_placed_state(self, seq: Sequence, matrix: Grid) -> tuple[int, bool, list[tuple[list[int], list[int]]]]:
-        tmp_combo = self._combo
-        broke_combo = False
-        rc_arr = []
-        for move in seq:
-            _place_block(move[0], move[1], move[2], matrix)
-            r, c = _remove_rows_and_cols(matrix)
-            tmp_combo = _adjust_combo(tmp_combo, r, c)
-            broke_combo = broke_combo or tmp_combo == 0
-            rc_arr.append((r, c))
-        return (tmp_combo, broke_combo, rc_arr)
-
-    def _undo_placed_state(self, seq: Sequence, matrix: Grid, rc_arr: list[tuple[list[int], list[int]]]) -> None:
-        for i in range(len(seq) - 1, -1, -1):
-            _add_rows_and_cols(rc_arr[i][0], rc_arr[i][1], matrix)
-            _remove_block(seq[i][0], seq[i][1], seq[i][2], matrix)
-
-    def _combo_maintained(self, matrix: Grid, combo: int, perm: tuple[int, int, int], idx: int):
-        if idx == 3:
-            return True
-        for i in range(R_BOUND):
-            for j in range(R_BOUND):
-                tmp_combo = combo
-                if _validate_action(perm[idx], i, j, matrix, False):
-                    _place_block(perm[idx], i, j, matrix)
-                    r, c = _remove_rows_and_cols(matrix)
-                    tmp_combo = _adjust_combo(tmp_combo, r, c)
-                    if tmp_combo > 0:
-                        if self._combo_maintained(matrix, tmp_combo, perm, idx + 1):
-                            return True
-                    _add_rows_and_cols(r, c, matrix)
-                    _remove_block(perm[idx], i, j, matrix)
-
-        return False
-
-    def _assess_state(self, matrix: Grid, combo: int):
-        no_break = 0
-        res = self._gen_liveable_choices(matrix)
-        for choice in res:
-            perms = _gen_perms(list(choice), [], set())
-            for perm in perms:
-                if self._combo_maintained(matrix, combo, perm, 0):
-                    no_break += 1
-                    break
-        return no_break / len(res)
-
     def _get_best_turn(self):
-        perms = _gen_perms(self.choices, [], set())
+        perms = _gen_perms(self.choices, [-1, -1, -1], {69, 78}, 0)
         options = []
-        m = copy.deepcopy(self.matrix)
+        m = _copy_matrix(self.matrix)
         for perm in perms:
-            options.extend(self._get_sequences(perm, 0, m, []))
+            options.extend(_get_sequences(perm, 0, m, [(-1, -1, -1) for _ in range(3)]))
         best = [True, 0]
         best_opt = options[0]
         done_so_far = 0
 
         # apply each Sequence
         for option in options:
-            tmp_combo, broke_combo, rc_arr = self._get_placed_state(option, m)
+            tmp_combo, broke_combo, rc_arr = _get_placed_state(option, m, self._combo)
             if not broke_combo or best[0]:
-                res = self._assess_state(m, tmp_combo)
+                res = _assess_state(m, tmp_combo)
                 if res > best[1]:
                     best[1] = res
                     best_opt = option
-            self._undo_placed_state(option, m, rc_arr)
+            _undo_placed_state(option, m, rc_arr)
             done_so_far += 1
-            # if done_so_far % 50 == 0:
-            print(f'{done_so_far} / {len(options)} done so far')
+            if done_so_far % 50 == 0:
+                print(f'{done_so_far} / {len(options)} done so far')
 
         return best_opt
 
