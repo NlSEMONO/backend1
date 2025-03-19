@@ -43,13 +43,13 @@ def _add_rotations(block: np.ndarray, r: int) -> None:
         globals()['blocks'] = np.append(blocks, [_normalize_np_arr(tmp)], axis=0)
 
 # Grid = game state
-type Grid = np.ndarray
+Grid = np.ndarray
 # Turn = choice of 3 blocks
-type Turn = tuple[int, int, int]
+Turn = tuple[int, int, int]
 # move = set of parameters to be fed into perform_action (think of this as placing a block)
-type Move = tuple[int, int, int]
+Move = tuple[int, int, int]
 # Sequence = 3 moves defining the way each Turn block should be used to proceed to next Grid
-type Sequence = tuple[Move, Move, Move]
+Sequence = tuple[Move, Move, Move]
 
 @njit
 def _remove_block(b: int, x: int, y: int, matrix: Grid) -> None:
