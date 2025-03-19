@@ -34,7 +34,7 @@ def _add_rotations(block: np.ndarray, r: int) -> None:
     """Adds the first r rotations of block to self.blocks
 
     Args:
-        block (Grid): the block to be rotated
+        block (np.ndarray): the block to be rotated
         r (int): number of 90 rotations to add to blocks list, starting at 0 degrees
     """
     globals()['blocks'] = np.append(blocks, [block], axis = 0)
@@ -45,47 +45,38 @@ def _add_rotations(block: np.ndarray, r: int) -> None:
         tmp = tmp2
         globals()['blocks'] = np.append(blocks, [_normalize_np_arr(tmp)], axis=0)
 
-# Grid = game state
-type Grid = np.ndarray
-# Turn = choice of 3 blocks
-type Turn = tuple[int, int, int]
-# move = set of parameters to be fed into perform_action (think of this as placing a block)
-type Move = tuple[int, int, int]
-# Sequence = 3 moves defining the way each Turn block should be used to proceed to next Grid
-type Sequence = tuple[Move, Move, Move]
-
 @njit
-def _remove_block(b: int, x: int, y: int, matrix: Grid) -> None:
+def _remove_block(b: int, x: int, y: int, matrix: np.ndarray) -> None:
     """
     Args:
         b (int): block index inside self.blocks
         x (int): top left y-coordinate placement location of the block
         y (int): top left x-coordinate placement location of the block
-        matrix (Grid): the matrix to remove the block from
+        matrix (np.ndarray): the matrix to remove the block from
     """
     for j in blocks[b][blocks[b] < PADDING]:
         matrix[j // 8 + x][j % 8 + y] = False
 
 @njit
-def _place_block(b: int, x: int, y: int, matrix: Grid) -> None:
+def _place_block(b: int, x: int, y: int, matrix: np.ndarray) -> None:
     """
     Args:
         b (int): block index to be placed
         x (int): top left y-coordinate placement location of the block
         y (int): top left x-coordinate placement location of the block
-        matrix (Grid): the matrix to place the block into
+        matrix (np.ndarray): the matrix to place the block into
     """
     for j in blocks[b][blocks[b] < PADDING]:
         matrix[j // 8 + x][j % 8 + y] = True
 
 @njit
-def _validate_action(b: int, x: int, y: int, matrix: Grid, print_error = True) -> bool:
+def _validate_action(b: int, x: int, y: int, matrix: np.ndarray, print_error = True) -> bool:
     """
     Args:
         b (int): block index to be placed
         x (int): top left y-coordinate placement location of the block
         y (int): top left x-coordinate placement location of the block
-        matrix (Grid): matrix to place the block into
+        matrix (np.ndarray): matrix to place the block into
         print_error (bool, optional): Print errors? Defaults to True
 
     Returns:
@@ -105,11 +96,11 @@ def _validate_action(b: int, x: int, y: int, matrix: Grid, print_error = True) -
     return True
 
 @njit
-def _remove_rows_and_cols(matrix: Grid) -> list[np.ndarray]:
+def _remove_rows_and_cols(matrix: np.ndarray) -> list[np.ndarray]:
     """Removes completed rows and columns from matrix
 
     Args:
-        matrix (Grid): matrix to remove rows and columns from
+        matrix (np.ndarray): matrix to remove rows and columns from
 
     Returns:
         list[list[int]]: the rows and columns that got removed
@@ -130,13 +121,13 @@ def _remove_rows_and_cols(matrix: Grid) -> list[np.ndarray]:
     return [r, c]
 
 @njit
-def _add_rows_and_cols(r: list[int], c: list[int] , m: Grid) -> None:
+def _add_rows_and_cols(r: list[int], c: list[int] , m: np.ndarray) -> None:
     """Opposite operation of _remove_rows_and_cols
 
     Args:
         r (list[int]): rows to add back
         c (list[int]): columns add back
-        m (Grid): matrix to add rows/cols back into
+        m (np.ndarray): matrix to add rows/cols back into
     """
     for i in range(R_BOUND):
         if r[i]:
@@ -146,7 +137,7 @@ def _add_rows_and_cols(r: list[int], c: list[int] , m: Grid) -> None:
             m[:,i] |= True
         
 @njit
-def _validate_choice_wkr(blks: list[int], m: Grid, idx: int) -> bool:
+def _validate_choice_wkr(blks: list[int], m: np.ndarray, idx: int) -> bool:
     if idx == 3:
         return True
     for i in range(R_BOUND):
@@ -164,12 +155,12 @@ def _validate_choice_wkr(blks: list[int], m: Grid, idx: int) -> bool:
 def _gen_perms(nums: list[int], perm_so_far: list[int], used: set[int], idx: int) -> set[tuple[int, int, int]]:
     """
     Args:
-        nums (list[int]): Turn as a list
+        nums (list[int]): tuple[int, int, int] as a list
         perm_so_far (list[int]): Accumulator variable for permutation so far
         used (set[int]): Set for tracking which numbers have already been used
 
     Returns:
-        set[tuple[int, int, int]]: All possible orders to play the Turn
+        set[tuple[int, int, int]]: All possible orders to play the tuple[int, int, int]
     """
     res = set()
     # valid permutation, add result
@@ -188,14 +179,14 @@ def _gen_perms(nums: list[int], perm_so_far: list[int], used: set[int], idx: int
     return res
 
 @njit
-def _validate_choice(blks: list[int], m: Grid) -> bool:
+def _validate_choice(blks: list[int], m: np.ndarray) -> bool:
     """
     Args:
-        blks (list[int]): Turn to validate
-        m (Grid): matrix to perform validation in
+        blks (list[int]): tuple[int, int, int] to validate
+        m (np.ndarray): matrix to perform validation in
 
     Returns:
-        bool: Does there exist a Sequence of moves to get through the Turn?
+        bool: Does there exist a sequence of moves to get through the tuple[int, int, int]?
     """
     perms = _gen_perms(blks, [-1, -1, -1], {76, 69}, 0)
     for perm in perms:
@@ -204,7 +195,7 @@ def _validate_choice(blks: list[int], m: Grid) -> bool:
     return False
 
 @njit
-def _gen_liveable_choices(matrix: Grid) -> set[tuple[int, int, int]]:
+def _gen_liveable_choices(matrix: np.ndarray) -> set[tuple[int, int, int]]:
     res = set()
     recur_matrix = _copy_matrix(matrix)
 
@@ -217,7 +208,7 @@ def _gen_liveable_choices(matrix: Grid) -> set[tuple[int, int, int]]:
     return res
 
 @njit
-def _get_sequences(perm: Turn, idx: int, m: Grid, seq_so_far: list[Move]) -> list[Sequence]:
+def _get_sequences(perm: tuple[int, int, int], idx: int, m: np.ndarray, seq_so_far: list[tuple[int, int, int]]) -> list[tuple[tuple[int, int, int], tuple[int, int, int], tuple[int, int, int]]]:
     if idx == len(perm):
         return [(seq_so_far[0], seq_so_far[1], seq_so_far[2])]
     options = []
@@ -234,11 +225,11 @@ def _get_sequences(perm: Turn, idx: int, m: Grid, seq_so_far: list[Move]) -> lis
     return options
 
 @njit
-def _copy_matrix(matrix: Grid):
+def _copy_matrix(matrix: np.ndarray):
     return np.array([[False for _ in range(8)] for _ in range(8)]) | matrix
 
 @njit
-def _get_placed_state(seq: Sequence, matrix: Grid, combo: int) -> tuple[int, bool, list[tuple[list[int], list[int]]]]:
+def _get_placed_state(seq: tuple[tuple[int, int, int], tuple[int, int, int], tuple[int, int, int]], matrix: np.ndarray, combo: int) -> tuple[int, bool, list[tuple[list[int], list[int]]]]:
     broke_combo = False
     rc_arr = []
     for move in seq:
@@ -250,13 +241,13 @@ def _get_placed_state(seq: Sequence, matrix: Grid, combo: int) -> tuple[int, boo
     return (combo, broke_combo, rc_arr)
 
 @njit
-def _undo_placed_state(seq: Sequence, matrix: Grid, rc_arr: list[tuple[list[int], list[int]]]) -> None:
+def _undo_placed_state(seq: tuple[tuple[int, int, int], tuple[int, int, int], tuple[int, int, int]], matrix: np.ndarray, rc_arr: list[tuple[list[int], list[int]]]) -> None:
     for i in range(len(seq) - 1, -1, -1):
         _add_rows_and_cols(rc_arr[i][0], rc_arr[i][1], matrix)
         _remove_block(seq[i][0], seq[i][1], seq[i][2], matrix)
 
 @njit
-def _combo_maintained(matrix: Grid, combo: int, perm: tuple[int, int, int], idx: int):
+def _combo_maintained(matrix: np.ndarray, combo: int, perm: tuple[int, int, int], idx: int):
     if idx == 3:
         return True
     for i in range(R_BOUND):
@@ -275,7 +266,7 @@ def _combo_maintained(matrix: Grid, combo: int, perm: tuple[int, int, int], idx:
     return False
 
 @njit(parallel=True)
-def _assess_state(matrix: Grid, combo: int):
+def _assess_state(matrix: np.ndarray, combo: int):
     no_break = 0
     res = list(_gen_liveable_choices(matrix))
     n = len(res)
@@ -381,7 +372,7 @@ class Game:
         best_opt = options[0]
         done_so_far = 0
 
-        # apply each Sequence
+        # apply each sequence
         for option in options:
             tmp_combo, broke_combo, rc_arr = _get_placed_state(option, m, self._combo)
             if not broke_combo or best[0]:
