@@ -11,7 +11,7 @@ print(numba.set_num_threads(8))
 R_BOUND = 8
 L_BOUND = 0
 PADDING = 100
-all_blocks = 0
+all_blocks = 3
 BLOCK_LEN = 9
 
 def _normalize(lst: list[int]):
@@ -28,7 +28,7 @@ blocks = np.array([
 
 @njit
 def _adjust_combo(combo: int, r: np.ndarray, c: np.ndarray):
-    return 3 if r.shape[0] + c.shape[0] > 0 else max(0, combo - 1)
+    return 3 if r.any() or c.any() else max(0, combo - 1)
 
 def _add_rotations(block: np.ndarray, r: int) -> None:
     """Adds the first r rotations of block to self.blocks
@@ -411,3 +411,52 @@ class Game:
         self._print_matrix()
         self._print_line()
         self._print_blocks()
+
+@njit(locals={'x':numba.u8, 'i':numba.u8, 'j':numba.u8, 'num': numba.u8})
+def _to_matrix(x: int):
+    res = [[False for _ in range(R_BOUND)] for _ in range(R_BOUND)]
+    num = 0
+    for i in range(R_BOUND-1, -1, -1):
+        for j in range(R_BOUND-1, -1, -1):
+            num += 2**(8*i + j)
+            if num <= x:
+                res[i][j] = True
+                x -= num
+            num = 0
+    return np.array(res)
+
+@njit(locals={'i':numba.u8, 'j':numba.u8, 'res':numba.uint64})
+def _to_num(matrix: np.ndarray):
+    res = 0
+    for i in range(R_BOUND):
+        for j in range(R_BOUND):
+            if matrix[i][j]:
+                res += 2**(8*i + j)
+    return res
+
+@njit(locals={'r':numba.types.bool[:], 'c':numba.types.bool[:],'combo':numba.u1})
+def _unique_paths(matrix: np.ndarray):
+	# dp algorithm to avoid duping paths that have same combo at the same matrix id
+    NUMBA_HINT_K, NUMBA_HINT_V = (int(2**63+1), 100), (100, 100, 100)
+    dp = [{NUMBA_HINT_K : NUMBA_HINT_V} for _ in range(4)]
+    dp[0][(_to_num(matrix), 0)] = (0, 100, 100)
+    for i in range(3):
+        done_so_far = 0
+        for m_id, combo in dp[i]:
+            if (m_id, combo) == NUMBA_HINT_K:
+                continue
+            prev_m = _to_matrix(m_id)
+            for j in range(1, all_blocks):
+                for x in range(R_BOUND):
+                    for y in range(R_BOUND):
+                        if _validate_action(j, x, y, prev_m):
+                            tmp_m = _copy_matrix(prev_m)
+                            _place_block(j, x, y, tmp_m)
+                            r, c = _remove_rows_and_cols(tmp_m)
+                            dp[i+1][(_to_num(tmp_m), _adjust_combo(combo, r, c))] = (j, x, y)
+            done_so_far += 1
+            if done_so_far % 3000 == 0:
+                print(f'{done_so_far} / {len(dp[i])} :)))')
+        print(f'{i} done {len(dp[i+1])}')
+    return dp
+
