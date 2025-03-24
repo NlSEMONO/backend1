@@ -14,6 +14,8 @@ PADDING = 100
 all_blocks = 3
 BLOCK_LEN = 9
 
+ONES = np.ones(R_BOUND * R_BOUND)
+
 def _normalize(lst: list[int]):
     return lst + [PADDING for _ in range(BLOCK_LEN - len(lst))]
 
@@ -279,6 +281,28 @@ def _assess_state(matrix: np.ndarray, combo: int):
                 break
     return no_break / len(res)
 
+def print_all_blocks():
+    m = np.max((blocks % PADDING) // 8) + 1
+    size = 6
+    for i in range(m):
+        print_str = ""
+        for c in range(1, all_blocks):
+            if c > 0 and np.max((blocks[c] % PADDING) // 8) >= i: 
+                width = np.max(blocks[c][blocks[c] < PADDING] % 8) + 1
+                buf = size - width
+                print_str += " " * (buf // 2)
+                for j in range(width):
+                    print_str += '#' if any(blocks[c] == 8 * i + j) else '.'
+                print_str += " " * ((buf // 2) + (buf % 2)) + "|"
+            else:
+                print_str += " " * (size) + "|"
+        print(print_str)
+    print_str = ""
+    for i in range(all_blocks - 1):
+        buf = size - len(str(i)) + 1
+        print_str += " " * (buf // 2) + f"{i + 1}" + " " * ((buf // 2) + (buf % 2))
+    print(print_str)
+
 class Game:
     """Methods to run a game of block blast
     """
@@ -425,6 +449,19 @@ def _to_matrix(x: int):
             num = 0
     return np.array(res)
 
+@njit(locals={'x':numba.u8, 'i':numba.u8, 'j':numba.u8, 'num': numba.u8})
+def _to_matrix1d(x: int):
+    res = [False for _ in range(R_BOUND * R_BOUND)]
+    num = 0
+    for i in range(R_BOUND-1, -1, -1):
+        for j in range(R_BOUND-1, -1, -1):
+            num += 2**(8*i + j)
+            if num <= x:
+                res[8 * i + j] = True
+                x -= num
+            num = 0
+    return np.array(res)
+
 @njit(locals={'i':numba.u8, 'j':numba.u8, 'res':numba.uint64})
 def _to_num(matrix: np.ndarray):
     res = 0
@@ -434,13 +471,23 @@ def _to_num(matrix: np.ndarray):
                 res += 2**(8*i + j)
     return res
 
+@njit
+def _arr_to_num(arr: np.ndarray):
+    res = 0
+    for i in range(R_BOUND):
+        if arr[i]:
+            res += 2**i
+    return res
+
 @njit(locals={'r':numba.types.bool[:], 'c':numba.types.bool[:],'combo':numba.u1})
-def _unique_paths(matrix: np.ndarray):
+def _unique_paths(matrix: np.ndarray, until: int, init_combo: int):
 	# dp algorithm to avoid duping paths that have same combo at the same matrix id
-    NUMBA_HINT_K, NUMBA_HINT_V = (int(2**63+1), 100), (100, 100, 100)
+    NUMBA_HINT_K, NUMBA_HINT_V = (int(2**63+1), 100), (100, 100, 100, 0, 0)
+    RC_V = (0, 0)
     dp = [{NUMBA_HINT_K : NUMBA_HINT_V} for _ in range(4)]
-    dp[0][(_to_num(matrix), 0)] = (0, 100, 100)
-    for i in range(3):
+    dp_rc = [{ NUMBA_HINT_K : RC_V } for _ in range(4)]
+    dp[0][(_to_num(matrix), init_combo)] = (0, 100, 100, 1, 0)
+    for i in range(until):
         done_so_far = 0
         for m_id, combo in dp[i]:
             if (m_id, combo) == NUMBA_HINT_K:
@@ -453,10 +500,86 @@ def _unique_paths(matrix: np.ndarray):
                             tmp_m = _copy_matrix(prev_m)
                             _place_block(j, x, y, tmp_m)
                             r, c = _remove_rows_and_cols(tmp_m)
-                            dp[i+1][(_to_num(tmp_m), _adjust_combo(combo, r, c))] = (j, x, y)
+                            next_key = (_to_num(tmp_m), _adjust_combo(combo, r, c))
+                            not_broke_so_far = dp[i][(m_id, combo)][3] if next_key[1] > 0 else 0
+                            broke_so_far = dp[i][(m_id, combo)][4] if next_key[1] > 0 else dp[i][(m_id, combo)][4] + dp[i][(m_id, combo)][3]
+                            if next_key in dp[i+1]:
+                                not_broke_so_far += dp[i+1][next_key][3]
+                                broke_so_far += dp[i+1][next_key][4]
+                            dp[i+1][next_key] = (j, x, y, not_broke_so_far, broke_so_far)
+                            dp_rc[i+1][next_key] = (_arr_to_num(r), _arr_to_num(c))
             done_so_far += 1
             if done_so_far % 3000 == 0:
                 print(f'{done_so_far} / {len(dp[i])} :)))')
         print(f'{i} done {len(dp[i+1])}')
-    return dp
+    return (dp, dp_rc)
 
+# given 3 blocks, compute all future states
+@njit(locals={'r':numba.types.bool[:], 'c':numba.types.bool[:],'combo':numba.u1,'m_id':numba.u8})
+def _possible_futures(matrix: np.ndarray, choices: list[int], init_combo: int):
+    NUMBA_HINT_K, NUMBA_HINT_V = (int(2**64-1), 100), (100, 100, 100, 0)
+    RC_V = (0, 0, 0)
+    dp = [{NUMBA_HINT_K : NUMBA_HINT_V} for _ in range(4)]
+    dp_rc = [{ NUMBA_HINT_K : RC_V } for _ in range(4)]
+    dp[0][(_to_num(matrix), init_combo)] = (0, 100, 100, 1)
+    perms = _gen_perms(choices, [-1, -1, -1], {69, 43}, 0)
+    for i in range(3):
+        done_so_far = 0
+        for m_id, combo in dp[i]:
+            if (m_id, combo) == NUMBA_HINT_K:
+                continue
+            prev_m = _to_matrix(m_id)
+            for perm in perms:
+                for x in range(R_BOUND):
+                    for y in range(R_BOUND):
+                        if _validate_action(perm[i], x, y, prev_m):
+                            tmp_m = _copy_matrix(prev_m)
+                            _place_block(perm[i], x, y, tmp_m)
+                            r, c = _remove_rows_and_cols(tmp_m)
+                            next_key = (_to_num(tmp_m), _adjust_combo(combo, r, c))
+                            if next_key[1] > 0: # exclude if combo broken
+                                # found_so_far = dp[i][(m_id, combo)][3]
+                                # if next_key in dp[i+1]:
+                                #     found_so_far += dp[i+1][next_key][3]
+                                dp[i+1][next_key] = (perm[i], x, y, 0)
+                                dp_rc[i+1][next_key] = (_arr_to_num(r), _arr_to_num(c))
+            done_so_far += 1
+            if done_so_far % 3000 == 0:
+                print(f'{done_so_far} / {len(dp[i])} :)))')
+        print(f'{i} done {len(dp[i+1])}')
+    # for i in range(4):
+    #     del dp[i][NUMBA_HINT_K]
+    return (dp, dp_rc)
+
+# from final states, choose the ones that maintain desired combo and the resultant matrix has >= 30 squares filled
+@njit
+def _get_good_states(pathfinder: list[dict[tuple[int, int], tuple[int, int, int, int]]]):
+    good_states = []
+    TOO_MUCH_COMPUTE = 30
+    for key in pathfinder[3]:
+        if np.sum(ONES[_to_matrix1d(key[0])]) >= TOO_MUCH_COMPUTE:
+            good_states.append(key)
+    return good_states
+
+@njit
+def _evaluate_state(paths):
+    not_broken = 0
+    all_paths = 0
+    LAST_MOVE = 3
+    for key in paths[LAST_MOVE]:
+        not_broken += paths[LAST_MOVE][key][3]
+        all_paths += paths[LAST_MOVE][key][4]
+    all_paths += not_broken
+    ret = not_broken / all_paths if all_paths > 0 else 0
+    print(ret)
+    return ret
+
+@njit
+def get_move(matrix: np.ndarray, choices: list[int], init_combo: int):
+    # _unique_paths(matrix, 3, init_combo)
+    paths, curr_rc = _possible_futures(matrix, choices, init_combo)
+    # good_states = [int(2**64-1)]
+    # good_states = _get_good_states(paths)
+    # for state in good_states:
+    #     next_paths, next_rc = _unique_paths(_to_matrix(state[0]), init_combo=state[1])
+    #     _evaluate_state(next_paths)
