@@ -1,9 +1,10 @@
-from Game import Game, _to_matrix, _to_num, get_move
+from Game import Game, _to_matrix, _to_num, get_move, _print_matrix
 from numba import njit
 import numba
 import numpy as np
 import sys
 from datetime import datetime
+import os
 
 ones = np.ones((8, 8))
 
@@ -13,27 +14,32 @@ if __name__ == '__main__':
     ub = int(sys.argv[2])
     to_example = np.array(
     # [
-    #     [True, True, False, True, False, True, True, True],
-    #     [True, True, False, True, False, True, True, True],
-    #     [True, True, False, False, False, False, False, False], 
     #     [False, False, False, False, False, False, False, False],
-    #     [True, False, True, True, True, True, True, True],
     #     [False, False, False, False, False, False, False, False],
-    #     [True, True, True, True, True, False, False, False],
-    #     [True, True, True, True, True, False, False, False]
+    #     [False, False, False, False, False, False, False, False],
+    #     [False, False, False, False, False, False, False, False],
+    #     [False, False, False, False, False, False, False, False],
+    #     [False, False, False, False, False, False, False, False],
+    #     [False, False, False, False, False, False, False, False],
+    #     [False, False, False, False, False, False, False, False],
     # ]
     [
-        [False, False, True, True, True, True, True, True],
-        [True, False, True, True, True, True, True, True],
-        [True, False, True, True, True, True, True, True],
-        [True, False, False, False, False, False, False, False],
-        [True, False, False, False, False, False, False, False],
-        [True, False, False, False, False, False, False, False],
-        [True, False, False, False, False, False, False, False],
-        [True, False, False, True, True, True, True, True]
+        [False, False, False, False, False, False, False, False],
+        [False, False, False, False, False, False, False, False],
+        [False, False, False, False, False, False, False, False],
+        [False, False, False, False, False, False, False, False],
+        [False, False, False, False, False, False, False, False],
+        [False, False, False, False, False, False, False, False],
+        [False, False, False, False, False, False, False, False],
+        [False, False, False, False, False, False, False, False],
     ]
     )
-    print(_to_num(to_example))
-    for i in range(lb, ub):
-        matrix = to_example
-        get_move(matrix, [3, 25, 26], 2)
+    combo = 2
+    matrix = _to_matrix(17077663014909008683)
+    _print_matrix(matrix, (0, 0, 0))
+    while True:
+        print(f"{_to_num(matrix)}")
+        print("Enter blocks: ")
+        choices = [int(x) for x in input().split()]
+        combo = get_move(matrix, choices, combo)
+        
