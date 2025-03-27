@@ -1,6 +1,5 @@
 from Game import Game, _to_matrix, _to_num, get_move, _print_matrix
 from numba import njit
-import numba
 import numpy as np
 import sys
 from datetime import datetime
@@ -35,7 +34,7 @@ if __name__ == '__main__':
     ]
     )
     combo = 2
-    matrix = _to_matrix(17077663014909008683)
+    matrix = _to_matrix(17077909275448727849)
     _print_matrix(matrix, (0, 0, 0))
     while True:
         print(f"{_to_num(matrix)}")
