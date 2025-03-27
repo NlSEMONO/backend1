@@ -589,7 +589,8 @@ def _get_good_states(pathfinder: list[dict[tuple[int, int], tuple[int, int, int,
     perms = {(69, 69, 69), (69, 69, 69)}
     perms = _gen_perms(choices, [-1, -1, -1], {69, 42}, 0)
     print(perms)
-    good_states = []
+    good_states = [(3, 64, int(2**63 + 1))]
+    good_states.pop()
     TOO_MUCH_COMPUTE = 30
     while len(good_states) == 0 and TOO_MUCH_COMPUTE >= 0:
         for key in pathfinder[3]:
@@ -609,6 +610,8 @@ def _get_good_states(pathfinder: list[dict[tuple[int, int], tuple[int, int, int,
         TOO_MUCH_COMPUTE -= 1
     good_states.sort(reverse=True)
     print(f'Found {len(good_states)} good states')
+    ret = [(int(2**63 + 1), 1)]
+    ret.pop()
     ret = [(state[2], state[0]) for state in good_states]
     return ret
 
@@ -665,7 +668,7 @@ def _check_good_states(good_states, paths, curr_rc, matrix, init_combo):
     return _apply_path(good_states[best[1]], paths, curr_rc, matrix, init_combo)
         
 
-# @njit
+@njit
 def get_move(matrix: np.ndarray, choices: list[int], init_combo: int):
     # _unique_paths(matrix, 3, init_combo)
     paths, curr_rc = _possible_futures(matrix, choices, init_combo)
