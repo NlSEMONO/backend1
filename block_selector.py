@@ -10,7 +10,7 @@ g = Game()
 from Game import all_blocks, blocks
 
 # Constants
-WIDTH, HEIGHT = 1200, 800
+WIDTH, HEIGHT = 1050, 800
 BLOCK_SIZE = 25
 GRID_COLS = 8  # 7 columns to fit 35 blocks in a 5-row grid
 GRID_ROWS = 5
@@ -126,9 +126,31 @@ def is_ok_button_clicked(pos):
 
 # Game Loop
 running = True
-matrix = _to_matrix(9222840010112295417)
+matrix = np.array(
+# [
+# 	[False, False, False, False, False, False, False, False],
+# 	[False, False, False, False, False, False, False, False],
+# 	[False, False, False, False, False, False, False, False],
+# 	[False, False, False, False, False, False, False, False],
+# 	[False, False, False, False, False, False, False, False],
+# 	[False, False, False, False, False, False, False, False],
+# 	[False, False, False, False, False, False, False, False],
+# 	[False, False, False, False, False, False, False, False],
+# ]
+[
+	[False, True, False, False, False, True, False, True],
+	[True, True, False, False, True, True, False, True],
+	[True, True, False, False, False, False, True, False],
+	[False, True, True, False, True, True, True, True],
+	[False, False, False, True, False, True, False, False],
+	[False, False, True, True, True, False, False, False],
+	[False, False, False, False, False, False, False, False],
+	[True, False, False, False, True, True, False, True]
+]
+)
+# matrix = _to_matrix(12754225106969146274)
 _print_matrix(matrix, (0, 0, 0))
-combo = 2
+combo = 3
 while running:
 	screen.fill(GRAY)
 
@@ -163,7 +185,7 @@ while running:
 	pygame.display.flip()
 
 	if get_move_process:
-		combo = get_move(matrix, [b[1] for b in selected_blocks], combo)
+		combo = get_move(matrix, [b[1] + 1 for b in selected_blocks], combo)
 		selected_blocks = []
 		get_move_process = False
 		print(_to_num(matrix))
