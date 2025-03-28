@@ -589,7 +589,8 @@ def _get_good_states(pathfinder: list[dict[tuple[int, int], tuple[int, int, int,
     perms = {(69, 69, 69), (69, 69, 69)}
     perms = _gen_perms(choices, [-1, -1, -1], {69, 42}, 0)
     print(perms)
-    good_states = []
+    good_states = [(3, 64, int(2**63 + 1))]
+    good_states.pop()
     TOO_MUCH_COMPUTE = 30
     while len(good_states) == 0 and TOO_MUCH_COMPUTE >= 0:
         for key in pathfinder[3]:
@@ -609,19 +610,9 @@ def _get_good_states(pathfinder: list[dict[tuple[int, int], tuple[int, int, int,
         TOO_MUCH_COMPUTE -= 1
     good_states.sort(reverse=True)
     print(f'Found {len(good_states)} good states')
+    ret = [(int(2**63 + 1), 1)]
+    ret.pop()
     ret = [(state[2], state[0]) for state in good_states]
-    return ret
-
-@njit
-def _evaluate_state(paths):
-    not_broken = 0
-    all_paths = 0
-    LAST_MOVE = 3
-    for key in paths[LAST_MOVE]:
-        not_broken += paths[LAST_MOVE][key][3]
-        all_paths += paths[LAST_MOVE][key][4]
-    all_paths += not_broken
-    ret = not_broken / all_paths if all_paths > 0 else 0
     return ret
 
 @njit
@@ -655,24 +646,29 @@ def _apply_path(state, paths, curr_rc, matrix, init_combo):
 
 @njit
 def _test_next_state(state):
-    next_paths, next_rc = _unique_paths(_to_matrix(state[0]), 3, state[1])
-    return _evaluate_state(next_paths)
+    return _assess_state(_to_matrix(state[0]), state[1])
 
+@njit
 def _check_good_states(good_states, paths, curr_rc, matrix, init_combo):
-    for i in range(len(good_states)):
+    best = (-1, 0)
+    for i in range(min(len(good_states), 100)):
         state = good_states[i]
         res = _test_next_state(state)
-        # res = 1
-        print(f"Use: {res}?")
-        inp = input()
-        inp = "y"
-        if inp[0] == "y":
-            return _apply_path(state, paths, curr_rc, matrix, init_combo)
-        elif inp[0] == "-" and int(inp) * -1 - 1 <= i:
-            idx = int(inp) * -1
-            return _apply_path(good_states[i-idx], paths, curr_rc, matrix, init_combo)
+        if best[0] < res:
+            best = (res, i)
+        # print(f'{i + 1} / {min(len(good_states), 100)}')
+        # print(f"Use: {res}?")
+        # inp = input()
+        # if inp[0] == "y":
+        #     return _apply_path(state, paths, curr_rc, matrix, init_combo)
+        # elif inp[0] == "-" and int(inp) * -1 - 1 <= i:
+        #     idx = int(inp) * -1
+        #     return _apply_path(good_states[i-idx], paths, curr_rc, matrix, init_combo)
+    print(f"checked {min(len(good_states), 100)} good states, choosing {best[1] + 1}th option with combo maintain probability of {int(best[0] * 100)}%")
+    return _apply_path(good_states[best[1]], paths, curr_rc, matrix, init_combo)
+        
 
-# @njit
+@njit
 def get_move(matrix: np.ndarray, choices: list[int], init_combo: int):
     # _unique_paths(matrix, 3, init_combo)
     paths, curr_rc = _possible_futures(matrix, choices, init_combo)
